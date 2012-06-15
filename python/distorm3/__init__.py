@@ -71,6 +71,7 @@ DECRES_NONE         = 0
 DECRES_SUCCESS      = 1
 DECRES_MEMORYERR    = 2
 DECRES_INPUTERR     = 3
+DECRES_FILTERED     = 4
 
 if SUPPORT_64BIT_OFFSET:
     _OffsetType = c_ulonglong
@@ -462,6 +463,18 @@ FLAGS = [
 # Instruction could not be disassembled. Special-case handling
 FLAG_NOT_DECODABLE = 0xFFFF # -1 in uint16
 
+# Flow control flags
+DF_STOP_ON_CALL = 0x8
+DF_STOP_ON_RET  = 0x10
+DF_STOP_ON_SYS  = 0x20
+DF_STOP_ON_UNC_BRANCH  = 0x40
+DF_STOP_ON_CND_BRANCH  = 0x80
+DF_STOP_ON_INT  = 0x100
+DF_STOP_ON_CMOV  = 0x200
+DF_STOP_ON_FLOW_CONTROL = (DF_STOP_ON_CALL | DF_STOP_ON_RET | DF_STOP_ON_SYS | \
+        DF_STOP_ON_UNC_BRANCH | DF_STOP_ON_CND_BRANCH | DF_STOP_ON_INT | DF_STOP_ON_CMOV)
+
+
 def DecodeGenerator(codeOffset, code, dt):
     """
     @type  codeOffset: long
@@ -814,7 +827,7 @@ class Instruction (object):
         return self._toText()
 
 
-def DecomposeGenerator(codeOffset, code, dt):
+def DecomposeGenerator(codeOffset, code, dt, stop):
     """
     @type  codeOffset: long
     @param codeOffset: Memory address where the code is located.
@@ -832,6 +845,9 @@ def DecomposeGenerator(codeOffset, code, dt):
          * L{Decode32Bits}: IA-32 decoding
 
          * L{Decode64Bits}: AMD64 decoding
+
+    @type  stop: int
+    @param stop: a flow control stopping criterion, eg. DF_STOP_ON_CALL
 
     @rtype:  generator of TODO
     @return: Generator of TODO
@@ -857,7 +873,7 @@ def DecomposeGenerator(codeOffset, code, dt):
     while codeLen > 0:
         
         usedInstructionsCount = c_uint(0)
-        codeInfo = _CodeInfo(_OffsetType(codeOffset), _OffsetType(0), cast(p_code, c_char_p), codeLen, dt, 0)
+        codeInfo = _CodeInfo(_OffsetType(codeOffset), _OffsetType(0), cast(p_code, c_char_p), codeLen, dt, stop)
         status = internal_decompose(byref(codeInfo), byref(result), MAX_INSTRUCTIONS, byref(usedInstructionsCount))
         if status == DECRES_INPUTERR:
             raise ValueError("Invalid arguments passed to distorm_decode()")
@@ -879,7 +895,10 @@ def DecomposeGenerator(codeOffset, code, dt):
         p_code     = byref(code_buf, instruction_off)
         codeLen    = codeLen - delta
 
-def Decompose(offset, code, type = Decode32Bits):
+        if stop > 0:
+            break # user passed a stop flag
+
+def Decompose(offset, code, type = Decode32Bits, stop=0):
     """
     @type  offset: long
     @param offset: Memory address where the code is located.
@@ -898,8 +917,11 @@ def Decompose(offset, code, type = Decode32Bits):
 
          * L{Decode64Bits}: AMD64 decoding
 
+    @type  stop: int
+    @param stop: a flow control stopping criterion, eg. DF_STOP_ON_CALL
+
     @rtype:  TODO
     @return: TODO
     @raise ValueError: Invalid arguments.
     """
-    return list( DecomposeGenerator(offset, code, type) )
+    return list( DecomposeGenerator(offset, code, type, stop) )
